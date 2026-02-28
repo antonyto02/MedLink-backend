@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -20,6 +20,7 @@ describe('AuthService', () => {
           provide: getRepositoryToken(User),
           useValue: {
             exists: jest.fn(),
+            findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
           },
@@ -69,4 +70,41 @@ describe('AuthService', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('logs in successfully with valid credentials', async () => {
+    usersRepository.findOne.mockResolvedValue({
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      name: 'Juan Perez',
+      email: 'juan@mail.com',
+      role: UserRole.PATIENT,
+      passwordHash:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:199ea45006bb3a3771ed77ed41a3dc0e4471d1aa7a27d2f95b0524e9b8813dd160c4e5ddd6590dc7fd090aef92f9f1717c10b12b21bb21f52e08122771014ce5',
+    } as User);
+
+    const result = await service.login({
+      email: 'juan@mail.com',
+      password: '123456',
+    });
+
+    expect(result.user.email).toBe('juan@mail.com');
+    expect(result.token.split('.')).toHaveLength(3);
+  });
+
+  it('throws unauthorized for invalid credentials', async () => {
+    usersRepository.findOne.mockResolvedValue({
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      name: 'Juan Perez',
+      email: 'juan@mail.com',
+      role: UserRole.PATIENT,
+      passwordHash: 'salt:invalidhash',
+    } as User);
+
+    await expect(
+      service.login({
+        email: 'juan@mail.com',
+        password: '123456',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
 });

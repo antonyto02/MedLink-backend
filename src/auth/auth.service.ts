@@ -3,14 +3,19 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHmac, randomBytes, scryptSync } from 'crypto';
 import { Repository } from 'typeorm';
+import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User, UserRole } from '../database/entities/user.entity';
 
-export interface RegisterResponse {
+export interface RegisterResponse extends AuthResponse {}
+
+
+export interface AuthResponse {
   token: string;
   user: {
     id: string;
@@ -46,22 +51,7 @@ export class AuthService {
 
     try {
       const savedUser = await this.usersRepository.save(user);
-
-      const token = this.signAccessToken({
-        sub: savedUser.id,
-        email: savedUser.email,
-        role: savedUser.role,
-      });
-
-      return {
-        token,
-        user: {
-          id: savedUser.id,
-          name: savedUser.name,
-          email: savedUser.email,
-          role: savedUser.role,
-        },
-      };
+      return this.buildAuthResponse(savedUser);
     } catch (error: unknown) {
       const dbCode = (error as { code?: string })?.code;
       if (dbCode === '23505') {
@@ -70,6 +60,19 @@ export class AuthService {
 
       throw new InternalServerErrorException('No se pudo registrar el usuario.');
     }
+  }
+
+  async login(input: LoginDto): Promise<AuthResponse> {
+    this.validateLoginInput(input);
+
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const user = await this.usersRepository.findOne({ where: { email: normalizedEmail } });
+
+    if (!user || !this.verifyPassword(input.password, user.passwordHash)) {
+      throw new UnauthorizedException('Credenciales inválidas.');
+    }
+
+    return this.buildAuthResponse(user);
   }
 
   private validateRegisterInput(input: RegisterDto): void {
@@ -94,6 +97,21 @@ export class AuthService {
     }
   }
 
+
+  private validateLoginInput(input: LoginDto): void {
+    if (!input || typeof input !== 'object') {
+      throw new BadRequestException('Body inválido.');
+    }
+
+    if (typeof input.email !== 'string' || !this.isValidEmail(input.email)) {
+      throw new BadRequestException('El correo no es válido.');
+    }
+
+    if (typeof input.password !== 'string' || input.password.length < 6) {
+      throw new BadRequestException('La contraseña debe tener al menos 6 caracteres.');
+    }
+  }
+
   private isValidEmail(value: string): boolean {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
   }
@@ -103,6 +121,35 @@ export class AuthService {
     const hash = scryptSync(password, salt, 64).toString('hex');
 
     return `${salt}:${hash}`;
+  }
+
+
+  private verifyPassword(password: string, passwordHash: string): boolean {
+    const [salt, storedHash] = passwordHash.split(':');
+    if (!salt || !storedHash) {
+      return false;
+    }
+
+    const calculatedHash = scryptSync(password, salt, 64).toString('hex');
+    return storedHash === calculatedHash;
+  }
+
+  private buildAuthResponse(user: User): AuthResponse {
+    const token = this.signAccessToken({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    };
   }
 
   private signAccessToken(payload: { sub: string; email: string; role: UserRole }): string {
