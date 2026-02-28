@@ -7,23 +7,30 @@ import { Appointment } from './database/entities/appointment.entity';
 import { DoctorSchedule } from './database/entities/doctor-schedule.entity';
 import { User } from './database/entities/user.entity';
 import { VitalSign } from './database/entities/vital-sign.entity';
-
-const databaseImports = process.env.DATABASE_URL
-  ? [
-      TypeOrmModule.forRoot({
-        type: 'postgres',
-        url: process.env.DATABASE_URL,
-        entities: [User, DoctorSchedule, Appointment, VitalSign],
-        migrations: [join(__dirname, 'database/migrations/*{.ts,.js}')],
-        migrationsRun: true,
-        synchronize: false,
-      }),
-    ]
-  : [];
+import { DatabaseConnectionService } from './database/database-connection.service';
 
 @Module({
-  imports: [...databaseImports],
+  imports: [
+    TypeOrmModule.forRootAsync({
+      useFactory: () => {
+        const databaseUrl = process.env.DATABASE_URL;
+
+        if (!databaseUrl) {
+          throw new Error('DATABASE_URL no está definida.');
+        }
+
+        return {
+          type: 'postgres' as const,
+          url: databaseUrl,
+          entities: [User, DoctorSchedule, Appointment, VitalSign],
+          migrations: [join(__dirname, 'database/migrations/*{.ts,.js}')],
+          migrationsRun: true,
+          synchronize: false,
+        };
+      },
+    }),
+  ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, DatabaseConnectionService],
 })
 export class AppModule {}
