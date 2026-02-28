@@ -3,11 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
+import { DatabaseConnectionService } from './database/database-connection.service';
 import { Appointment } from './database/entities/appointment.entity';
 import { DoctorSchedule } from './database/entities/doctor-schedule.entity';
 import { User } from './database/entities/user.entity';
 import { VitalSign } from './database/entities/vital-sign.entity';
-import { DatabaseConnectionService } from './database/database-connection.service';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { DatabaseConnectionService } from './database/database-connection.servic
         };
       },
     }),
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService, DatabaseConnectionService],
