@@ -8,12 +8,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHmac, randomBytes, scryptSync } from 'crypto';
 import { Repository } from 'typeorm';
+import { DoctorSchedule } from '../database/entities/doctor-schedule.entity';
+import { User, UserRole } from '../database/entities/user.entity';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { User, UserRole } from '../database/entities/user.entity';
-
-export interface RegisterResponse extends AuthResponse {}
-
 
 export interface AuthResponse {
   token: string;
@@ -25,11 +23,15 @@ export interface AuthResponse {
   };
 }
 
+export interface RegisterResponse extends AuthResponse {}
+
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(DoctorSchedule)
+    private readonly doctorScheduleRepository: Repository<DoctorSchedule>,
   ) {}
 
   async register(input: RegisterDto): Promise<RegisterResponse> {
@@ -51,6 +53,11 @@ export class AuthService {
 
     try {
       const savedUser = await this.usersRepository.save(user);
+
+      if (savedUser.role === UserRole.DOCTOR) {
+        await this.generateDoctorSchedules(savedUser.id);
+      }
+
       return this.buildAuthResponse(savedUser);
     } catch (error: unknown) {
       const dbCode = (error as { code?: string })?.code;
@@ -75,6 +82,88 @@ export class AuthService {
     return this.buildAuthResponse(user);
   }
 
+  private async generateDoctorSchedules(doctorId: string): Promise<void> {
+    const slots = this.buildDoctorScheduleSlots(doctorId);
+    if (!slots.length) {
+      return;
+    }
+
+    await this.doctorScheduleRepository
+      .createQueryBuilder()
+      .insert()
+      .into(DoctorSchedule)
+      .values(slots)
+      .orIgnore()
+      .execute();
+  }
+
+  private buildDoctorScheduleSlots(doctorId: string): Array<Pick<DoctorSchedule, 'doctorId' | 'date' | 'time' | 'available'>> {
+    const slots: Array<Pick<DoctorSchedule, 'doctorId' | 'date' | 'time' | 'available'>> = [];
+    const startDate = new Date();
+    startDate.setHours(0, 0, 0, 0);
+
+    for (let dayOffset = 0; dayOffset < 90; dayOffset += 1) {
+      const currentDate = new Date(startDate);
+      currentDate.setDate(startDate.getDate() + dayOffset);
+
+      const dayOfWeek = currentDate.getDay();
+      const date = this.formatDate(currentDate);
+
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        this.pushHalfHourRange(slots, doctorId, date, '08:00', '14:00');
+        this.pushHalfHourRange(slots, doctorId, date, '16:00', '20:00');
+      } else if (dayOfWeek === 6) {
+        this.pushHalfHourRange(slots, doctorId, date, '09:00', '13:00');
+      }
+    }
+
+    return slots;
+  }
+
+  private pushHalfHourRange(
+    slots: Array<Pick<DoctorSchedule, 'doctorId' | 'date' | 'time' | 'available'>>,
+    doctorId: string,
+    date: string,
+    startTime: string,
+    endTime: string,
+  ): void {
+    let currentMinutes = this.timeToMinutes(startTime);
+    const endMinutes = this.timeToMinutes(endTime);
+
+    while (currentMinutes < endMinutes) {
+      slots.push({
+        doctorId,
+        date,
+        time: this.minutesToTime(currentMinutes),
+        available: true,
+      });
+
+      currentMinutes += 30;
+    }
+  }
+
+  private timeToMinutes(value: string): number {
+    const [hours, minutes] = value.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+
+  private minutesToTime(value: number): string {
+    const hours = Math.floor(value / 60)
+      .toString()
+      .padStart(2, '0');
+    const minutes = (value % 60).toString().padStart(2, '0');
+
+    return `${hours}:${minutes}:00`;
+  }
+
+  private formatDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
   private validateRegisterInput(input: RegisterDto): void {
     if (!input || typeof input !== 'object') {
       throw new BadRequestException('Body inválido.');
@@ -96,7 +185,6 @@ export class AuthService {
       throw new BadRequestException('El rol debe ser patient o doctor.');
     }
   }
-
 
   private validateLoginInput(input: LoginDto): void {
     if (!input || typeof input !== 'object') {
@@ -122,7 +210,6 @@ export class AuthService {
 
     return `${salt}:${hash}`;
   }
-
 
   private verifyPassword(password: string, passwordHash: string): boolean {
     const [salt, storedHash] = passwordHash.split(':');

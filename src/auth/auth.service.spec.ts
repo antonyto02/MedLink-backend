@@ -3,15 +3,32 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuthService } from './auth.service';
+import { DoctorSchedule } from '../database/entities/doctor-schedule.entity';
 import { User, UserRole } from '../database/entities/user.entity';
 
 describe('AuthService', () => {
   let service: AuthService;
   let usersRepository: jest.Mocked<Repository<User>>;
+  let doctorScheduleRepository: jest.Mocked<Repository<DoctorSchedule>>;
+  let queryBuilderMock: {
+    insert: jest.Mock;
+    into: jest.Mock;
+    values: jest.Mock;
+    orIgnore: jest.Mock;
+    execute: jest.Mock;
+  };
 
   beforeEach(async () => {
     process.env.ACCESS_TOKEN_SECRET = 'test_secret';
     process.env.ACCESS_TOKEN_EXPIRES_IN = '15m';
+
+    queryBuilderMock = {
+      insert: jest.fn().mockReturnThis(),
+      into: jest.fn().mockReturnThis(),
+      values: jest.fn().mockReturnThis(),
+      orIgnore: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -25,14 +42,21 @@ describe('AuthService', () => {
             save: jest.fn(),
           },
         },
+        {
+          provide: getRepositoryToken(DoctorSchedule),
+          useValue: {
+            createQueryBuilder: jest.fn().mockReturnValue(queryBuilderMock),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
     usersRepository = module.get(getRepositoryToken(User));
+    doctorScheduleRepository = module.get(getRepositoryToken(DoctorSchedule));
   });
 
-  it('registers a user and returns a token', async () => {
+  it('registers a patient and returns a token without generating schedules', async () => {
     const input = {
       name: 'Juan Perez',
       email: 'juan@mail.com',
@@ -55,7 +79,43 @@ describe('AuthService', () => {
     expect(result.user.email).toBe('juan@mail.com');
     expect(result.user.role).toBe(UserRole.PATIENT);
     expect(result.token.split('.')).toHaveLength(3);
-    expect(usersRepository.create).toHaveBeenCalled();
+    expect(doctorScheduleRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('registers a doctor and generates schedules for the next 90 days', async () => {
+    usersRepository.exists.mockResolvedValue(false);
+    usersRepository.create.mockImplementation((data) => data as User);
+    usersRepository.save.mockResolvedValue({
+      id: 'doctor-uuid',
+      name: 'Dr. Juan Perez',
+      email: 'dr.juan@mail.com',
+      role: UserRole.DOCTOR,
+      passwordHash: 'salt:hash',
+    } as User);
+
+    const result = await service.register({
+      name: 'Dr. Juan Perez',
+      email: 'dr.juan@mail.com',
+      password: '123456',
+      role: UserRole.DOCTOR,
+    });
+
+    expect(result.user.role).toBe(UserRole.DOCTOR);
+    expect(doctorScheduleRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
+    expect(queryBuilderMock.insert).toHaveBeenCalledTimes(1);
+    expect(queryBuilderMock.orIgnore).toHaveBeenCalledTimes(1);
+    expect(queryBuilderMock.execute).toHaveBeenCalledTimes(1);
+
+    const insertedSlots = queryBuilderMock.values.mock.calls[0][0] as Array<{
+      doctorId: string;
+      date: string;
+      time: string;
+      available: boolean;
+    }>;
+
+    expect(insertedSlots.length).toBeGreaterThan(0);
+    expect(insertedSlots.every((slot) => slot.doctorId === 'doctor-uuid')).toBe(true);
+    expect(insertedSlots.every((slot) => slot.available === true)).toBe(true);
   });
 
   it('throws conflict when email already exists', async () => {
@@ -106,5 +166,4 @@ describe('AuthService', () => {
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
-
 });
