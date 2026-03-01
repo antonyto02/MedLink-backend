@@ -11,6 +11,7 @@ import { Appointment, AppointmentStatus } from '../database/entities/appointment
 import { DoctorSchedule } from '../database/entities/doctor-schedule.entity';
 import { UserRole } from '../database/entities/user.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 
 export interface MyAppointmentItem {
   id: string;
@@ -170,4 +171,55 @@ export class AppointmentsService {
       status: row.status,
     }));
   }
+
+  async updateStatus(
+    appointmentId: string,
+    input: UpdateAppointmentStatusDto,
+    request: AuthenticatedRequest,
+  ): Promise<{ appointment: { id: string; status: AppointmentStatus } }> {
+    const authenticatedUser = request.user;
+
+    if (!authenticatedUser) {
+      throw new HttpException({ error: { code: 'UNAUTHORIZED' } }, HttpStatus.UNAUTHORIZED);
+    }
+
+    if (authenticatedUser.role !== UserRole.DOCTOR) {
+      throw new HttpException({ error: { code: 'ONLY_DOCTOR_ALLOWED' } }, HttpStatus.FORBIDDEN);
+    }
+
+    if (
+      input?.status !== AppointmentStatus.COMPLETADA &&
+      input?.status !== AppointmentStatus.NO_ASISTIO
+    ) {
+      throw new HttpException({ error: { code: 'INVALID_STATUS' } }, HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const appointmentRepo = this.dataSource.getRepository(Appointment);
+    const appointment = await appointmentRepo.findOne({
+      where: { id: appointmentId, doctorId: authenticatedUser.sub },
+      select: { id: true, status: true },
+    });
+
+    if (!appointment) {
+      throw new HttpException({ error: { code: 'APPOINTMENT_NOT_FOUND' } }, HttpStatus.NOT_FOUND);
+    }
+
+    if (appointment.status !== AppointmentStatus.PROGRAMADA) {
+      throw new HttpException(
+        { error: { code: 'APPOINTMENT_ALREADY_CLOSED' } },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    appointment.status = input.status as AppointmentStatus;
+    const updated = await appointmentRepo.save(appointment);
+
+    return {
+      appointment: {
+        id: updated.id,
+        status: updated.status,
+      },
+    };
+  }
+
 }

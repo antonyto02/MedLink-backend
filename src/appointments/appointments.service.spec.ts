@@ -225,4 +225,104 @@ describe('AppointmentsService', () => {
       status: 403,
     } as HttpException);
   });
+
+  it('updates appointment status for doctor owner when appointment is programada', async () => {
+    const appointmentRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        status: AppointmentStatus.PROGRAMADA,
+      }),
+      save: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        status: AppointmentStatus.COMPLETADA,
+      }),
+    };
+
+    dataSource.getRepository.mockReturnValue(appointmentRepo);
+
+    const result = await service.updateStatus(
+      'appointment-1',
+      { status: 'completada' },
+      { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+    );
+
+    expect(appointmentRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 'appointment-1', doctorId: 'doctor-1' },
+      select: { id: true, status: true },
+    });
+    expect(result).toEqual({
+      appointment: {
+        id: 'appointment-1',
+        status: AppointmentStatus.COMPLETADA,
+      },
+    });
+  });
+
+  it('throws INVALID_STATUS for unsupported status update', async () => {
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'programada' },
+        { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'INVALID_STATUS' } },
+      status: 422,
+    } as HttpException);
+  });
+
+  it('throws APPOINTMENT_NOT_FOUND when appointment does not belong to doctor', async () => {
+    const appointmentRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+
+    dataSource.getRepository.mockReturnValue(appointmentRepo);
+
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'completada' },
+        { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'APPOINTMENT_NOT_FOUND' } },
+      status: 404,
+    } as HttpException);
+  });
+
+  it('throws APPOINTMENT_ALREADY_CLOSED when appointment is not programada', async () => {
+    const appointmentRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        status: AppointmentStatus.COMPLETADA,
+      }),
+    };
+
+    dataSource.getRepository.mockReturnValue(appointmentRepo);
+
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'no_asistio' },
+        { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'APPOINTMENT_ALREADY_CLOSED' } },
+      status: 409,
+    } as HttpException);
+  });
+
+  it('throws ONLY_DOCTOR_ALLOWED when non-doctor tries to update status', async () => {
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'completada' },
+        { user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'ONLY_DOCTOR_ALLOWED' } },
+      status: 403,
+    } as HttpException);
+  });
+
 });

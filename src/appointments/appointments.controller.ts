@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 import type { AuthenticatedRequest } from '../auth/guards/access-token.guard';
 import {
@@ -7,6 +7,7 @@ import {
   MyAppointmentItem,
 } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 
 @Controller('appointments')
 export class AppointmentsController {
@@ -34,4 +35,15 @@ export class AppointmentsController {
   ): Promise<DoctorAppointmentItem[]> {
     return this.appointmentsService.getDoctorAppointments(request);
   }
+
+  @Patch(':id/status')
+  @UseGuards(AccessTokenGuard)
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() body: UpdateAppointmentStatusDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.appointmentsService.updateStatus(id, body, request);
+  }
+
 }
