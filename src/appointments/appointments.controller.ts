@@ -1,7 +1,7 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 import type { AuthenticatedRequest } from '../auth/guards/access-token.guard';
-import { AppointmentsService } from './appointments.service';
+import { AppointmentsService, MyAppointmentItem } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 
 @Controller('appointments')
@@ -15,5 +15,11 @@ export class AppointmentsController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.appointmentsService.create(body, request);
+  }
+
+  @Get('me')
+  @UseGuards(AccessTokenGuard)
+  async getMyAppointments(@Req() request: AuthenticatedRequest): Promise<MyAppointmentItem[]> {
+    return this.appointmentsService.getMyAppointments(request);
   }
 }

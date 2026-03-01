@@ -7,11 +7,15 @@ import { UserRole } from '../database/entities/user.entity';
 
 describe('AppointmentsService', () => {
   let service: AppointmentsService;
-  let dataSource: { transaction: jest.Mock };
+  let dataSource: {
+    transaction: jest.Mock;
+    getRepository: jest.Mock;
+  };
 
   beforeEach(async () => {
     dataSource = {
       transaction: jest.fn(),
+      getRepository: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -124,5 +128,52 @@ describe('AppointmentsService', () => {
       response: { error: { code: 'SLOT_NOT_AVAILABLE' } },
       status: 409,
     } as HttpException);
+  });
+
+  it('returns logged patient appointments with doctor/date/time/status', async () => {
+    const queryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'appointment-1',
+          doctor: 'Dr. Juan Perez',
+          date: '2026-03-04',
+          time: '08:30:00',
+          status: AppointmentStatus.PROGRAMADA,
+        },
+      ]),
+    };
+
+    dataSource.getRepository.mockReturnValue({
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    });
+
+    const result = await service.getMyAppointments({
+      user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT },
+    } as any);
+
+    expect(result).toEqual([
+      {
+        id: 'appointment-1',
+        doctor: 'Dr. Juan Perez',
+        date: '2026-03-04',
+        time: '08:30',
+        status: AppointmentStatus.PROGRAMADA,
+      },
+    ]);
+  });
+
+  it('returns empty array for doctor user in /appointments/me', async () => {
+    const result = await service.getMyAppointments({
+      user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR },
+    } as any);
+
+    expect(result).toEqual([]);
+    expect(dataSource.getRepository).not.toHaveBeenCalled();
   });
 });

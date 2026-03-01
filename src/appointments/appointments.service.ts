@@ -6,11 +6,19 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { AuthenticatedRequest } from '../auth/guards/access-token.guard';
+import type { AuthenticatedRequest } from '../auth/guards/access-token.guard';
 import { Appointment, AppointmentStatus } from '../database/entities/appointment.entity';
 import { DoctorSchedule } from '../database/entities/doctor-schedule.entity';
 import { UserRole } from '../database/entities/user.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+
+export interface MyAppointmentItem {
+  id: string;
+  doctor: string;
+  date: string;
+  time: string;
+  status: AppointmentStatus;
+}
 
 @Injectable()
 export class AppointmentsService {
@@ -71,5 +79,46 @@ export class AppointmentsService {
         },
       };
     });
+  }
+
+  async getMyAppointments(request: AuthenticatedRequest): Promise<MyAppointmentItem[]> {
+    const authenticatedUser = request.user;
+
+    if (!authenticatedUser) {
+      throw new HttpException({ error: { code: 'UNAUTHORIZED' } }, HttpStatus.UNAUTHORIZED);
+    }
+
+    if (authenticatedUser.role !== UserRole.PATIENT) {
+      return [];
+    }
+
+    const rows = await this.dataSource
+      .getRepository(Appointment)
+      .createQueryBuilder('appointment')
+      .innerJoin('appointment.doctor', 'doctor')
+      .innerJoin('appointment.schedule', 'schedule')
+      .where('appointment.patient_id = :patientId', { patientId: authenticatedUser.sub })
+      .select('appointment.id', 'id')
+      .addSelect('doctor.name', 'doctor')
+      .addSelect('schedule.date', 'date')
+      .addSelect('schedule.time', 'time')
+      .addSelect('appointment.status', 'status')
+      .orderBy('schedule.date', 'DESC')
+      .addOrderBy('schedule.time', 'DESC')
+      .getRawMany<{
+        id: string;
+        doctor: string;
+        date: string;
+        time: string;
+        status: AppointmentStatus;
+      }>();
+
+    return rows.map((row) => ({
+      id: row.id,
+      doctor: row.doctor,
+      date: row.date,
+      time: row.time.slice(0, 5),
+      status: row.status,
+    }));
   }
 }

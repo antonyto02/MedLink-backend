@@ -1,8 +1,9 @@
 import {
   CanActivate,
   ExecutionContext,
+  HttpException,
+  HttpStatus,
   Injectable,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { Request } from 'express';
@@ -23,7 +24,7 @@ export class AccessTokenGuard implements CanActivate {
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Token no proporcionado.');
+      throw this.unauthorized();
     }
 
     const token = authHeader.slice(7).trim();
@@ -36,12 +37,12 @@ export class AccessTokenGuard implements CanActivate {
   private verifyAccessToken(token: string): { sub: string; email: string; role: UserRole } {
     const secret = process.env.ACCESS_TOKEN_SECRET;
     if (!secret) {
-      throw new UnauthorizedException('ACCESS_TOKEN_SECRET no está configurado.');
+      throw this.unauthorized();
     }
 
     const parts = token.split('.');
     if (parts.length !== 3) {
-      throw new UnauthorizedException('Token inválido.');
+      throw this.unauthorized();
     }
 
     const [headerEncoded, payloadEncoded, signatureEncoded] = parts;
@@ -55,7 +56,7 @@ export class AccessTokenGuard implements CanActivate {
       .replace(/\//g, '_');
 
     if (expectedSignature !== signatureEncoded) {
-      throw new UnauthorizedException('Token inválido.');
+      throw this.unauthorized();
     }
 
     const payload = JSON.parse(Buffer.from(payloadEncoded, 'base64url').toString('utf8')) as {
@@ -66,12 +67,12 @@ export class AccessTokenGuard implements CanActivate {
     };
 
     if (!payload.sub || !payload.email || !payload.role) {
-      throw new UnauthorizedException('Token inválido.');
+      throw this.unauthorized();
     }
 
     const now = Math.floor(Date.now() / 1000);
     if (!payload.exp || payload.exp <= now) {
-      throw new UnauthorizedException('Token expirado.');
+      throw this.unauthorized();
     }
 
     return {
@@ -79,5 +80,9 @@ export class AccessTokenGuard implements CanActivate {
       email: payload.email,
       role: payload.role,
     };
+  }
+
+  private unauthorized(): HttpException {
+    return new HttpException({ error: { code: 'UNAUTHORIZED' } }, HttpStatus.UNAUTHORIZED);
   }
 }
