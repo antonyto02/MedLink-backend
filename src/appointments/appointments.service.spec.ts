@@ -1,0 +1,328 @@
+import { ForbiddenException, HttpException } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+import { DataSource } from 'typeorm';
+import { AppointmentsService } from './appointments.service';
+import { AppointmentStatus } from '../database/entities/appointment.entity';
+import { UserRole } from '../database/entities/user.entity';
+
+describe('AppointmentsService', () => {
+  let service: AppointmentsService;
+  let dataSource: {
+    transaction: jest.Mock;
+    getRepository: jest.Mock;
+  };
+
+  beforeEach(async () => {
+    dataSource = {
+      transaction: jest.fn(),
+      getRepository: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AppointmentsService,
+        {
+          provide: DataSource,
+          useValue: dataSource,
+        },
+      ],
+    }).compile();
+
+    service = module.get<AppointmentsService>(AppointmentsService);
+  });
+
+  it('creates appointment and marks slot unavailable', async () => {
+    const schedule = {
+      id: 'schedule-1',
+      doctorId: 'doctor-1',
+      date: '2026-03-04',
+      time: '08:30:00',
+      available: true,
+    };
+
+    const scheduleRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(schedule),
+      }),
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const appointmentRepo = {
+      create: jest.fn().mockImplementation((data) => data),
+      save: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        doctorId: 'doctor-1',
+        patientId: 'patient-1',
+        status: AppointmentStatus.PROGRAMADA,
+      }),
+    };
+
+    dataSource.transaction.mockImplementation(async (cb) =>
+      cb({
+        getRepository: jest
+          .fn()
+          .mockReturnValueOnce(scheduleRepo)
+          .mockReturnValueOnce(appointmentRepo),
+      }),
+    );
+
+    const result = await service.create(
+      { doctor_id: 'doctor-1', schedule_id: 'schedule-1' },
+      { user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT } } as any,
+    );
+
+    expect(result).toEqual({
+      appointment: {
+        id: 'appointment-1',
+        doctor_id: 'doctor-1',
+        patient_id: 'patient-1',
+        date: '2026-03-04',
+        time: '08:30',
+        status: 'programada',
+      },
+    });
+    expect(scheduleRepo.save).toHaveBeenCalledWith({ ...schedule, available: false });
+  });
+
+  it('throws ONLY_PATIENT_CAN_BOOK when requester is not patient', async () => {
+    await expect(
+      service.create(
+        { doctor_id: 'doctor-1', schedule_id: 'schedule-1' },
+        { user: { sub: 'doctor-2', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'ONLY_PATIENT_CAN_BOOK' } },
+      status: 403,
+    } as ForbiddenException);
+  });
+
+  it('throws SLOT_NOT_AVAILABLE when slot is already occupied', async () => {
+    const scheduleRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'schedule-1',
+          doctorId: 'doctor-1',
+          date: '2026-03-04',
+          time: '08:30:00',
+          available: false,
+        }),
+      }),
+    };
+
+    dataSource.transaction.mockImplementation(async (cb) =>
+      cb({
+        getRepository: jest.fn().mockReturnValue(scheduleRepo),
+      }),
+    );
+
+    await expect(
+      service.create(
+        { doctor_id: 'doctor-1', schedule_id: 'schedule-1' },
+        { user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'SLOT_NOT_AVAILABLE' } },
+      status: 409,
+    } as HttpException);
+  });
+
+  it('returns logged patient appointments with doctor/date/time/status', async () => {
+    const queryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'appointment-1',
+          doctor: 'Dr. Juan Perez',
+          date: '2026-03-04',
+          time: '08:30:00',
+          status: AppointmentStatus.PROGRAMADA,
+        },
+      ]),
+    };
+
+    dataSource.getRepository.mockReturnValue({
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    });
+
+    const result = await service.getMyAppointments({
+      user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT },
+    } as any);
+
+    expect(result).toEqual([
+      {
+        id: 'appointment-1',
+        doctor: 'Dr. Juan Perez',
+        date: '2026-03-04',
+        time: '08:30',
+        status: AppointmentStatus.PROGRAMADA,
+      },
+    ]);
+  });
+
+  it('returns empty array for doctor user in /appointments/me', async () => {
+    const result = await service.getMyAppointments({
+      user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR },
+    } as any);
+
+    expect(result).toEqual([]);
+    expect(dataSource.getRepository).not.toHaveBeenCalled();
+  });
+
+  it('returns doctor appointments with patient/date/time/status', async () => {
+    const queryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'appointment-2',
+          patient: 'Pedro Ramirez',
+          date: '2026-03-04',
+          time: '09:00:00',
+          status: AppointmentStatus.COMPLETADA,
+        },
+      ]),
+    };
+
+    dataSource.getRepository.mockReturnValue({
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    });
+
+    const result = await service.getDoctorAppointments({
+      user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR },
+    } as any);
+
+    expect(result).toEqual([
+      {
+        id: 'appointment-2',
+        patient: 'Pedro Ramirez',
+        date: '2026-03-04',
+        time: '09:00',
+        status: AppointmentStatus.COMPLETADA,
+      },
+    ]);
+  });
+
+  it('throws ONLY_DOCTOR_ALLOWED when user is not doctor in /appointments/doctor', async () => {
+    await expect(
+      service.getDoctorAppointments({
+        user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT },
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'ONLY_DOCTOR_ALLOWED' } },
+      status: 403,
+    } as HttpException);
+  });
+
+  it('updates appointment status for doctor owner when appointment is programada', async () => {
+    const appointmentRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        status: AppointmentStatus.PROGRAMADA,
+      }),
+      save: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        status: AppointmentStatus.COMPLETADA,
+      }),
+    };
+
+    dataSource.getRepository.mockReturnValue(appointmentRepo);
+
+    const result = await service.updateStatus(
+      'appointment-1',
+      { status: 'completada' },
+      { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+    );
+
+    expect(appointmentRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 'appointment-1', doctorId: 'doctor-1' },
+      select: { id: true, status: true },
+    });
+    expect(result).toEqual({
+      appointment: {
+        id: 'appointment-1',
+        status: AppointmentStatus.COMPLETADA,
+      },
+    });
+  });
+
+  it('throws INVALID_STATUS for unsupported status update', async () => {
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'programada' },
+        { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'INVALID_STATUS' } },
+      status: 422,
+    } as HttpException);
+  });
+
+  it('throws APPOINTMENT_NOT_FOUND when appointment does not belong to doctor', async () => {
+    const appointmentRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+
+    dataSource.getRepository.mockReturnValue(appointmentRepo);
+
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'completada' },
+        { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'APPOINTMENT_NOT_FOUND' } },
+      status: 404,
+    } as HttpException);
+  });
+
+  it('throws APPOINTMENT_ALREADY_CLOSED when appointment is not programada', async () => {
+    const appointmentRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'appointment-1',
+        status: AppointmentStatus.COMPLETADA,
+      }),
+    };
+
+    dataSource.getRepository.mockReturnValue(appointmentRepo);
+
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'no_asistio' },
+        { user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'APPOINTMENT_ALREADY_CLOSED' } },
+      status: 409,
+    } as HttpException);
+  });
+
+  it('throws ONLY_DOCTOR_ALLOWED when non-doctor tries to update status', async () => {
+    await expect(
+      service.updateStatus(
+        'appointment-1',
+        { status: 'completada' },
+        { user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT } } as any,
+      ),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'ONLY_DOCTOR_ALLOWED' } },
+      status: 403,
+    } as HttpException);
+  });
+
+});
