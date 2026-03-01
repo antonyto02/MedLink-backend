@@ -42,7 +42,11 @@ export class Appointment {
   @JoinColumn({ name: 'schedule_id' })
   schedule: DoctorSchedule;
 
-  @Column({ type: 'varchar' })
+  @Column({
+    type: 'enum',
+    enum: AppointmentStatus,
+    enumName: 'appointment_status_enum',
+  })
   status: AppointmentStatus;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp', default: () => 'now()' })
