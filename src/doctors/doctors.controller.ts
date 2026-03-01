@@ -1,5 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
-import { DoctorListItem, DoctorsService } from './doctors.service';
+import { Controller, Get, Param, Query } from '@nestjs/common';
+import { DoctorListItem, DoctorScheduleResponse, DoctorsService } from './doctors.service';
 
 @Controller('doctors')
 export class DoctorsController {
@@ -8,5 +8,13 @@ export class DoctorsController {
   @Get()
   async findAll(): Promise<DoctorListItem[]> {
     return this.doctorsService.findAll();
+  }
+
+  @Get(':id/schedule')
+  async findAvailableSchedule(
+    @Param('id') id: string,
+    @Query('date') date?: string,
+  ): Promise<DoctorScheduleResponse> {
+    return this.doctorsService.findAvailableSchedule(id, date);
   }
 }
