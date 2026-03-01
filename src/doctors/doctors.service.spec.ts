@@ -55,11 +55,11 @@ describe('DoctorsService', () => {
     });
   });
 
-  it('returns available schedule for a doctor on a date', async () => {
+  it('returns schedule for a doctor on a date including availability', async () => {
     usersRepository.findOne.mockResolvedValue({ id: 'doctor-1' } as User);
     doctorScheduleRepository.find.mockResolvedValue([
-      { id: 'uuid1', time: '08:00:00' },
-      { id: 'uuid2', time: '08:30:00' },
+      { id: 'uuid1', time: '08:00:00', available: true },
+      { id: 'uuid2', time: '08:30:00', available: false },
     ] as DoctorSchedule[]);
 
     const result = await service.findAvailableSchedule('doctor-1', '2026-03-04');
@@ -67,8 +67,8 @@ describe('DoctorsService', () => {
     expect(result).toEqual({
       date: '2026-03-04',
       slots: [
-        { schedule_id: 'uuid1', time: '08:00' },
-        { schedule_id: 'uuid2', time: '08:30' },
+        { schedule_id: 'uuid1', time: '08:00', available: true },
+        { schedule_id: 'uuid2', time: '08:30', available: false },
       ],
     });
     expect(usersRepository.findOne).toHaveBeenCalledWith({
@@ -76,8 +76,8 @@ describe('DoctorsService', () => {
       select: { id: true },
     });
     expect(doctorScheduleRepository.find).toHaveBeenCalledWith({
-      where: { doctorId: 'doctor-1', date: '2026-03-04', available: true },
-      select: { id: true, time: true },
+      where: { doctorId: 'doctor-1', date: '2026-03-04' },
+      select: { id: true, time: true, available: true },
       order: { time: 'ASC' },
     });
   });
