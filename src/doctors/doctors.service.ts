@@ -14,6 +14,7 @@ export interface DoctorScheduleResponse {
   slots: Array<{
     schedule_id: string;
     time: string;
+    available: boolean;
   }>;
 }
 
@@ -49,8 +50,8 @@ export class DoctorsService {
     }
 
     const schedules = await this.doctorScheduleRepository.find({
-      where: { doctorId, date, available: true },
-      select: { id: true, time: true },
+      where: { doctorId, date },
+      select: { id: true, time: true, available: true },
       order: { time: 'ASC' },
     });
 
@@ -59,6 +60,7 @@ export class DoctorsService {
       slots: schedules.map((schedule) => ({
         schedule_id: schedule.id,
         time: schedule.time.slice(0, 5),
+        available: schedule.available,
       })),
     };
   }
