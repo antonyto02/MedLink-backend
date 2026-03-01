@@ -4,6 +4,7 @@ import { join } from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { DoctorsModule } from './doctors/doctors.module';
 import { DatabaseConnectionService } from './database/database-connection.service';
 import { Appointment } from './database/entities/appointment.entity';
 import { DoctorSchedule } from './database/entities/doctor-schedule.entity';
@@ -31,6 +32,7 @@ import { VitalSign } from './database/entities/vital-sign.entity';
       },
     }),
     AuthModule,
+    DoctorsModule,
   ],
   controllers: [AppController],
   providers: [AppService, DatabaseConnectionService],
