@@ -20,6 +20,14 @@ export interface MyAppointmentItem {
   status: AppointmentStatus;
 }
 
+export interface DoctorAppointmentItem {
+  id: string;
+  patient: string;
+  date: string;
+  time: string;
+  status: AppointmentStatus;
+}
+
 @Injectable()
 export class AppointmentsService {
   constructor(private readonly dataSource: DataSource) {}
@@ -116,6 +124,47 @@ export class AppointmentsService {
     return rows.map((row) => ({
       id: row.id,
       doctor: row.doctor,
+      date: row.date,
+      time: row.time.slice(0, 5),
+      status: row.status,
+    }));
+  }
+
+  async getDoctorAppointments(request: AuthenticatedRequest): Promise<DoctorAppointmentItem[]> {
+    const authenticatedUser = request.user;
+
+    if (!authenticatedUser) {
+      throw new HttpException({ error: { code: 'UNAUTHORIZED' } }, HttpStatus.UNAUTHORIZED);
+    }
+
+    if (authenticatedUser.role !== UserRole.DOCTOR) {
+      throw new HttpException({ error: { code: 'ONLY_DOCTOR_ALLOWED' } }, HttpStatus.FORBIDDEN);
+    }
+
+    const rows = await this.dataSource
+      .getRepository(Appointment)
+      .createQueryBuilder('appointment')
+      .innerJoin('appointment.patient', 'patient')
+      .innerJoin('appointment.schedule', 'schedule')
+      .where('appointment.doctor_id = :doctorId', { doctorId: authenticatedUser.sub })
+      .select('appointment.id', 'id')
+      .addSelect('patient.name', 'patient')
+      .addSelect('schedule.date', 'date')
+      .addSelect('schedule.time', 'time')
+      .addSelect('appointment.status', 'status')
+      .orderBy('schedule.date', 'DESC')
+      .addOrderBy('schedule.time', 'DESC')
+      .getRawMany<{
+        id: string;
+        patient: string;
+        date: string;
+        time: string;
+        status: AppointmentStatus;
+      }>();
+
+    return rows.map((row) => ({
+      id: row.id,
+      patient: row.patient,
       date: row.date,
       time: row.time.slice(0, 5),
       status: row.status,

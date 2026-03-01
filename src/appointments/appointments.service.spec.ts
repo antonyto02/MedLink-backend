@@ -176,4 +176,53 @@ describe('AppointmentsService', () => {
     expect(result).toEqual([]);
     expect(dataSource.getRepository).not.toHaveBeenCalled();
   });
+
+  it('returns doctor appointments with patient/date/time/status', async () => {
+    const queryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'appointment-2',
+          patient: 'Pedro Ramirez',
+          date: '2026-03-04',
+          time: '09:00:00',
+          status: AppointmentStatus.COMPLETADA,
+        },
+      ]),
+    };
+
+    dataSource.getRepository.mockReturnValue({
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    });
+
+    const result = await service.getDoctorAppointments({
+      user: { sub: 'doctor-1', email: 'd@mail.com', role: UserRole.DOCTOR },
+    } as any);
+
+    expect(result).toEqual([
+      {
+        id: 'appointment-2',
+        patient: 'Pedro Ramirez',
+        date: '2026-03-04',
+        time: '09:00',
+        status: AppointmentStatus.COMPLETADA,
+      },
+    ]);
+  });
+
+  it('throws ONLY_DOCTOR_ALLOWED when user is not doctor in /appointments/doctor', async () => {
+    await expect(
+      service.getDoctorAppointments({
+        user: { sub: 'patient-1', email: 'p@mail.com', role: UserRole.PATIENT },
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'ONLY_DOCTOR_ALLOWED' } },
+      status: 403,
+    } as HttpException);
+  });
 });
