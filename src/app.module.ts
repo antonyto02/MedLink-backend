@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { IotController } from './iot.controller';
+import { IotModule } from './iot/iot.module';
 import { AuthModule } from './auth/auth.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { DoctorsModule } from './doctors/doctors.module';
@@ -36,8 +36,9 @@ import { VitalSign } from './database/entities/vital-sign.entity';
     AuthModule,
     AppointmentsModule,
     DoctorsModule,
+    IotModule,
   ],
-  controllers: [AppController, IotController],
+  controllers: [AppController],
   providers: [AppService, DatabaseConnectionService],
 })
 export class AppModule {}

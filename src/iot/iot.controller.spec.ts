@@ -1,21 +1,21 @@
 import { IotController } from './iot.controller';
+import { IotGateway } from './iot.gateway';
 
 describe('IotController', () => {
   let controller: IotController;
+  let gateway: IotGateway;
 
   beforeEach(() => {
-    controller = new IotController();
+    gateway = { emitVitals: jest.fn() } as unknown as IotGateway;
+    controller = new IotController(gateway);
   });
 
-  it('should print payload in console', () => {
+  it('should emit vitals via gateway', () => {
     const payload = { heartRate: 88 };
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
 
     const response = controller.receiveVitals(payload);
 
-    expect(consoleSpy).toHaveBeenCalledWith(payload);
+    expect(gateway.emitVitals).toHaveBeenCalledWith(payload);
     expect(response).toEqual({ message: 'Vitals recibidos' });
-
-    consoleSpy.mockRestore();
   });
 });
